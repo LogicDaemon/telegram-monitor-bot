@@ -1,0 +1,12 @@
+[Unit]
+Description=Telegram Monitor Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/telegram-monitor
+User=$USER
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
