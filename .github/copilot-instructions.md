@@ -1,31 +1,37 @@
 # GitHub Copilot Instructions
 
+- ALWAYS use (first-order or modal) logic for thinking and responding; if you notice a logic flaw in the message history, point it out and try to derive the better conclusion
+- Assume messages formed as questions may include or be based on wrong premises. You MUST point them out
 - Avoid AI sycophancy. Even if there could be multiple views or the user gets easily offended, at least express a mild doubt
   - NEVER say "You’re absolutely right", "Good point", "you’re right that" etc. Skip all those introductions! Only dry objective facts
   - Avoid adjectives and adverbs, especially emotional ones
+- ALWAYS use tools for numeric ariphmetic and formal logic, NEVER calculate without
+- Write out expressions in general form and use python SymPy to simplify them before 
+
+## Tools
+
 - Avoid `run_in_terminal`/`shell`/`bash` and similar tools when more targeted tool is available:
   - `read_file` not `cat`
   - `list_dir` not `ls`
   - `file_search`, `grep_search`, `semantic_search` instead of `grep`
   - `replace_string_in_file` not `sed`
-  - etc: `create_directory`, `create_file`, `fetch_webpage`, `get_changed_files`, `get_errors`, `list_code_usages`
-- When `run_in_terminal`/`shell`/`bash` is necessary, *prefer Python* over shell commands
+  - etc: `create_directory`, `create_file`, `WebFetch`, `fetch_webpage`, `get_changed_files`, `get_errors`, `list_code_usages`
+- When `run_in_terminal`/`shell`/`bash` is necessary, _prefer Python_ over shell commands
   - use `pylanceRunCodeSnippet` instead of shell when it's available
-  - In OpenCode on Windows, `bash` tool actually executes `cmd.exe`, which does not support Here-Doc `<<EOF` and `<<<`.
-  - *ALWAYS* make backups when updating files without `edit` tool
-- Do not commit anything to git unless requested to. Before committing, run `git status` and `git diff` to ensure only the intended changes are included
-
-## If multi-root worspace:
-
-- Check the current directory (`pwd`) or execute `cd` before the shell commands, do not assume the default directory is what you expect
+  - In OpenCode on Windows, `bash` tool actually executes `cmd.exe`, which does not support Here-Doc `<<EOF` and `<<<`
+  - In VS Code on Windows, `shell` tool fails to parse any commands with `--` (including `--switch`), and requires manual review for each one - please avoid
+  - MAKE BACKUPS when updating files without `edit`/`write` tools (using scripts and shell for example)
+    - If the repository uses jujutsu, run `jj st --no-pager` to make the backups
+- Do not commit anything to git unless requested to; before committing, run `git status` and `git diff` to ensure only the intended changes are included
+- Avoid temp files; if you run a command and the output is too big, the harness will save the output as a file automatically and will provide you the access
 
 ## Editing
 
 - Avoid editing files with scripts (`sed`/`python`/whatever) except when it's a massive change with hundreds of lines
-  * When doing scripted changes, always implement copy (`.backup-YYYY-MM-DD-HH-MM-SS`) before edit, and call a subagent to validate the changes and check the diff
-  * Please do use `sed` (without `-i`), `rg`, `grep`, `python`, or whatever else is necessary (including calling a subagent) to *find* the files and places, instead of iterating through big files
+  - When doing scripted changes, always implement copy (`.backup-YYYY-MM-DD-HH-MM-SS`) before edit, and call a subagent to validate the changes and check the diff
+  - Please do use `sed` (without `-i`), `rg`, `grep`, `python`, or whatever else is necessary (including calling a subagent) to _find_ the files and places, instead of iterating through big files
 - NEVER insert, replace or delete singular blocks of text with scripts, always use the `edit`/`write` tool for that!
-- DO NOT REMOVE COMMENTS you did not add; if you rewrite a block, MAKE SURE to preserve them!
+- Preserve comments you didn't write, even during rewrites; mark clearly outdated ones and leave them for my review
 - Any edits you make are visible as a diff to the user, NEVER reiterate them in the response
 - Prefer inline documentation over separate files, except when those files already exist or explicitly requested
 - After updating code, call subagent to check and update documentation to reflect any changes in architecture or conventions
@@ -36,26 +42,6 @@
 
 ## Coding Conventions
 
-- Avoid Speculative Safety: evaluate code by context, not hypothetical reuse (e.g. python aliasing is acceptable if it works)
-- No Premature Generalization
-  - Implement a new variant of a function if necessary, but keep its structure close to the merging candidates
-  - Merging of those variants is done separately (during refactoring or when requested)
-
-## Complex tasks approach
-
-- Call subagent to review existing tasks and find relevant or matching one (MUST use subagent to avoid context pollution)
-- Create a `.github/tasks/<name>.md` file with:
-  1. End goal
-  - NEVER update the goal: if the goal shifts/does not match anymore for any reason, create a new task file
-  - The user may manually edit/clarify it. Honor it and do not change it back. If the plan does not lead to the goal, fix the plan
-  2. Starting state, constraints (but do not reiterate instructions or skills)
-  3. Failed attempts: what has been tried already (if applicable), why it failed or what went wrong. This should be updated as you learn more, and must be updated after each failed attempt or user correction
-  4. Step-by-step plan, each step with a verifiable outcome
-  - That plan should be optimistic direct path to the goal. If you need to fix anything, add the fix to failed attempts instead, and remove the failed step from the plan
-- Treat the file as your help when the chat history is wiped or compacted. Write exact values, paths, mistakes and solutions (working commands), not some vague descriptions. Avoid adjectives and adverbs. The more dry and factual, the better
-- After implementing each step, mark it as "verifying" and test (or ask the user to test with exact instructions)
-  - If it works, mark it as "done", deduplicate failed attempts and plan, then proceed to the next step
-  - If it doesn't work:
-    1. Update the failed attempts, remove the failed step from the plan
-    2. Undo changes from the failed step (use git or jj diff or history)
-- ONLY when the task is done AND you got the user's confirmation, call subagent to append the summary (TL;DR) to the TOP of the file. Make sure it's specific.
+- Implement a new variant of a function if necessary, but keep its structure close to the merge candidates
+- Merging of those variants is done separately (during refactoring)
+- Avoid specifying defaults. When explicitly setting a parameter to match the default, add a comment explaining why those exact values must be preserved even if the callee (function/class/etc) changes its defaults

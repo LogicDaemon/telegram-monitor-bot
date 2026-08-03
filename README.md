@@ -6,12 +6,14 @@ A simple Go-based Telegram bot to monitor host connectivity. It sends a message 
 - Notifies when connection is established.
 - Updates the original connection message every minute to show the current time ("Связь есть ...").
 - In case of a network or delivery failure, repeatedly attempts to send a "connection lost" message until it succeeds.
+- Uploads the current status to `app:/host-monitor/status.txt` on Yandex Disk every 10 minutes.
 - Installed as a systemd service using the provided `deploy.sh`.
 
 ## Requirements
 - Go 1.24.1 or higher
 - A Telegram Bot Token from [@BotFather](https://t.me/botfather).
 - A target Telegram Channel / Group with the bot added as an Administrator.
+- Optional: a static Yandex Disk API application token with the `cloud_api:disk.app_folder` permission.
 
 ## Configuration
 
@@ -23,9 +25,18 @@ By default on Linux, this is located at `~/.local/_sec/telegram_monitor_bot_secr
 
 ```json
 {
-  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN"
+  "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+  "yandex_disk_client_token": "YOUR_YANDEX_DISK_CLIENT_TOKEN"
 }
 ```
+
+`yandex_disk_client_token` is optional. If it is missing, the Telegram monitor starts without the Yandex Disk worker.
+
+The static Yandex Disk API application token is obtained using this link:
+
+<https://oauth.yandex.ru/authorize?response_type=token&client_id=ca79e936dc1646998180d04b87e678b6>
+
+The API application must have the Yandex Disk permission `cloud_api:disk.app_folder`. This application does not perform an OAuth exchange at runtime; it sends the stored token as `Authorization: OAuth <token>` when requesting the upload URL.
 
 ### 2. Settings file (`settings.json`)
 
