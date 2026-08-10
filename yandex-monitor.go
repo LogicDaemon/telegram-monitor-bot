@@ -82,62 +82,35 @@ func getYandexUploadURL(client *http.Client, uploadURLRequest *http.Request) (st
 	return uploadResponse.Href, nil
 }
 
-func refreshYandexUploadURLAfterFailure(
-	client *http.Client,
-	uploadURLRequest *http.Request,
-	uploadURL *string,
-	uploadErr error,
-) error {
-	newUploadURL, err := getYandexUploadURL(client, uploadURLRequest)
-	if err != nil {
-		return fmt.Errorf("%w; error refreshing Yandex Disk upload URL: %v", uploadErr, err)
-	}
-	*uploadURL = newUploadURL
-
-	return uploadErr
-}
-
 func uploadToYandexDisk(
 	client *http.Client,
 	uploadURLRequest *http.Request,
-	uploadURL *string,
 	message string,
 ) error {
+	uploadURL, err := getYandexUploadURL(client, uploadURLRequest)
+	if err != nil {
+		return fmt.Errorf("error preparing Yandex Disk upload URL: %w", err)
+	}
 
 	putRequest, err := http.NewRequest(
 		http.MethodPut,
-		*uploadURL,
+		uploadURL,
 		bytes.NewBufferString(message),
 	)
 	if err != nil {
-		return refreshYandexUploadURLAfterFailure(
-			client,
-			uploadURLRequest,
-			uploadURL,
-			fmt.Errorf("error creating Yandex Disk file upload request: %w", err),
-		)
+		return fmt.Errorf("error creating Yandex Disk file upload request: %w", err)
 	}
 	putRequest.Header.Set("Content-Type", "text/plain; charset=utf-8")
 
 	putResponse, err := client.Do(putRequest)
 	if err != nil {
-		return refreshYandexUploadURLAfterFailure(
-			client,
-			uploadURLRequest,
-			uploadURL,
-			fmt.Errorf("error uploading file to Yandex Disk: %w", err),
-		)
+		return fmt.Errorf("error uploading file to Yandex Disk: %w", err)
 	}
 	defer putResponse.Body.Close()
 
 	if putResponse.StatusCode != http.StatusCreated && putResponse.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(io.LimitReader(putResponse.Body, 4096))
-		return refreshYandexUploadURLAfterFailure(
-			client,
-			uploadURLRequest,
-			uploadURL,
-			fmt.Errorf("Yandex Disk file upload returned %s: %s", putResponse.Status, strings.TrimSpace(string(body))),
-		)
+		return fmt.Errorf("Yandex Disk file upload returned %s: %s", putResponse.Status, strings.TrimSpace(string(body)))
 	}
 
 	return nil
@@ -148,11 +121,6 @@ func runYandexMonitor(clientToken string) {
 	uploadURLRequest, err := newYandexUploadURLRequest(clientToken)
 	if err != nil {
 		log.Printf("Error creating Yandex Disk upload URL request: %v", err)
-		return
-	}
-	uploadURL, err := getYandexUploadURL(client, uploadURLRequest)
-	if err != nil {
-		log.Printf("Error getting initial Yandex Disk upload URL: %v", err)
 		return
 	}
 
@@ -175,7 +143,7 @@ func runYandexMonitor(clientToken string) {
 			)
 		}
 
-		if err := uploadToYandexDisk(client, uploadURLRequest, &uploadURL, statusText); err == nil {
+		if err := uploadToYandexDisk(client, uploadURLRequest, statusText); err == nil {
 			if !failureTime.IsZero() && time.Now().After(failureStatusUntil) {
 				failureTime = time.Time{}
 			}
