@@ -1,11 +1,11 @@
 # Host Monitor Bot
 
-A simple Go-based Telegram bot to monitor host connectivity. It sends a message to a specific Telegram channel when the application starts (or re-establishes connection) and updates the message every minute to confirm the host is online. If the connection fails, it will attempt to send a "connection lost" message.
+A simple Go-based Telegram bot to monitor host connectivity. It sends a message to a specific Telegram channel when the application starts (or re-establishes connection) and updates the message every minute to confirm the host is online. Delivery failures are logged and retried; no separate "connection lost" message is posted.
 
 ## Features
 - Notifies when connection is established.
 - Updates the original connection message every minute to show the current time ("Связь есть ...").
-- In case of a network or delivery failure, repeatedly attempts to send a "connection lost" message until it succeeds.
+- On a network or delivery failure, logs the error and retries sending every minute. The frozen "Связь есть" message keeps the time of its last successful update, so the gap between it and the next "Соединение установлено" message shows the outage window.
 - Uploads the current status to `app:/host-monitor/status.txt` on Yandex Disk every 10 minutes.
 - Installed as a systemd service using the provided `deploy.sh`.
 

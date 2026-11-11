@@ -17,6 +17,11 @@ const (
 	ServiceName      = "telegram-monitor-bot"
 	SecretsFilename  = "host_monitor_bot_secrets.json"
 	SettingsFilename = "settings.json"
+	// RetryDelay preserves the 1-minute cadence the removed handleFailure loop
+	// used between send attempts. The outer loop needs that pacing: after a
+	// failed send it must not retry in a tight loop, otherwise the fast-failing
+	// requests (DNS/connect refused) hammer the Telegram API and trigger 429s.
+	RetryDelay = time.Minute
 )
 
 // Secrets holds only the authentication secrets for the bot.
@@ -159,26 +164,6 @@ func printInstructions() {
 	fmt.Println("   Use the 'Id' number from the 'Forwarded from chat' value (including the negative sign)")
 }
 
-func handleFailure(bot *tgbotapi.BotAPI, channelID int64, failTime time.Time) {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	// Try immediately first
-	for {
-		failText := fmt.Sprintf("Подключение оборвалось %s", failTime.Format(time.RFC1123))
-		msgConf := tgbotapi.NewMessage(channelID, failText)
-
-		if _, err := bot.Send(msgConf); err == nil {
-			log.Println("Failure message sent successfully")
-			return
-		} else {
-			log.Printf("Error sending fail message: %v", err)
-		}
-
-		<-ticker.C
-	}
-}
-
 // main executes the service.
 func main() {
 	secrets, err := loadSecrets()
@@ -214,7 +199,7 @@ func main() {
 				log.Fatalf("Failed to send initial message (chat not found): %v", err)
 			}
 			log.Printf("Failed to send initial message: %v", err)
-			handleFailure(bot, settings.TelegramChannelID, time.Now())
+			time.Sleep(RetryDelay)
 			continue
 		}
 
@@ -248,7 +233,7 @@ func main() {
 		}
 
 		if updateFailed {
-			handleFailure(bot, settings.TelegramChannelID, time.Now())
+			time.Sleep(RetryDelay)
 		}
 	}
 }
