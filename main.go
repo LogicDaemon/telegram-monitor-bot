@@ -25,14 +25,28 @@ const (
 )
 
 // Secrets holds only the authentication secrets for the bot.
+// WhatsApp fields are optional: an empty access token or phone number ID
+// disables WhatsApp answering (see newWhatsAppPublisher). The app secret and
+// the verify token enable the webhook server, and are ignored without a
+// configured publisher.
 type Secrets struct {
 	TelegramBotToken      string `json:"telegram_bot_token"`
+	WhatsAppAccessToken   string `json:"whatsapp_access_token"`
+	WhatsAppPhoneNumberID string `json:"whatsapp_phone_number_id"`
+	WhatsAppAppSecret     string `json:"whatsapp_app_secret"`
+	WebhookVerifyToken    string `json:"webhook_verify_token"`
 	YandexDiskClientToken string `json:"yandex_disk_client_token"`
 }
 
 // Settings holds the configuration settings for the bot.
+// WebhookListen is the loopback address the webhook server binds to, such as
+// 127.0.0.1:8080; TLS is terminated in front of it by the Cloudflare Tunnel.
+// StatusKeywords is the regular expression matched against text messages from
+// participants. An empty expression matches every message.
 type Settings struct {
-	TelegramChannelID int64 `json:"telegram_channel_id"`
+	TelegramChannelID int64  `json:"telegram_channel_id"`
+	WebhookListen     string `json:"webhook_listen"`
+	StatusKeywords    string `json:"status_keywords"`
 }
 
 func getLocalAppDataDir() string {
@@ -142,26 +156,57 @@ func printInstructions() {
 	fmt.Printf("Missing required configuration for the %s.\n", ServiceName)
 	fmt.Println("\nPlease create the following configuration files:")
 
-	fmt.Println("\n1. Secrets file (for the bot token):")
+	fmt.Println("\n1. Secrets file (for the bot tokens):")
 	fmt.Printf("   Path: %s\n", getDefaultSecretsPath())
 	fmt.Println("   Format:")
 	fmt.Println(`   {
      "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+     "whatsapp_access_token": "YOUR_WHATSAPP_ACCESS_TOKEN",
+     "whatsapp_phone_number_id": "YOUR_WHATSAPP_PHONE_NUMBER_ID",
+     "whatsapp_app_secret": "YOUR_WHATSAPP_APP_SECRET",
+     "webhook_verify_token": "YOUR_WEBHOOK_VERIFY_TOKEN",
      "yandex_disk_client_token": "YOUR_YANDEX_DISK_CLIENT_TOKEN"
      }`)
 	fmt.Println("   To obtain the Telegram token, create a Telegram bot by talking to @BotFather")
+	fmt.Println("   WhatsApp access token and phone number ID are optional. Get them from a Cloud API system")
+	fmt.Println("   user in the Meta developer app (WhatsApp > API Setup). Answering needs no Official")
+	fmt.Println("   Business Account: the bot replies 1:1, in the 24-hour customer service window that each")
+	fmt.Println("   participant's own message opens. Since 2026-10-01 Meta does not deliver service messages")
+	fmt.Println("   for a Messaging account with no payment method on file, so add one in WhatsApp Manager.")
 	fmt.Println("   The Yandex Disk token is optional. To enable Yandex Disk status uploads, get it at:")
 	fmt.Println("   https://oauth.yandex.ru/authorize?response_type=token&client_id=ca79e936dc1646998180d04b87e678b6")
 
-	fmt.Println("\n2. Settings file (for the channel ID):")
+	fmt.Println("\n2. Settings file (for the channel ID and the webhook):")
 	fmt.Printf("   Path: %s\n", getSettingsPath())
 	fmt.Println("   Format:")
 	fmt.Println(`   {
-     "telegram_channel_id": YOUR_CHANNEL_ID_NUMBER
+     "telegram_channel_id": YOUR_CHANNEL_ID_NUMBER,
+      "webhook_listen": "127.0.0.1:8080",
+      "status_keywords": "(?i)^(статус|status)$"
    }`)
 	fmt.Println("   To get it, add your bot to the target channel as an administrator,")
 	fmt.Println("   and forward a message from the channel to @userinfobot.")
 	fmt.Println("   Use the 'Id' number from the 'Forwarded from chat' value (including the negative sign)")
+	fmt.Println("   webhook_listen, whatsapp_app_secret and webhook_verify_token are optional, and are used")
+	fmt.Println("   only when WhatsApp answering is configured. The webhook server binds to webhook_listen")
+	fmt.Println("   on plain HTTP, so TLS is terminated in front of it: for example a Cloudflare Tunnel")
+	fmt.Println("   hostname pointing at 127.0.0.1:8080. The Callback URL in the Meta app dashboard must be")
+	fmt.Println("   the public HTTPS URL of that hostname plus /webhook, and webhook_verify_token must match")
+	fmt.Println("   the Verify token field. The app needs the whatsapp_business_messaging permission, must")
+	fmt.Println("   be in Live mode, and must subscribe to the messages field.")
+	fmt.Println("   status_keywords is optional: it is a regular expression matched against text messages")
+	fmt.Println("   from participants. An omitted or empty expression matches every message.")
+}
+
+// monitoringStartMessage is the message that opens the monitoring period. The
+// per-minute updates that follow carry the current time, so this text is the
+// statement that monitoring began at this moment.
+func monitoringStartMessage() string {
+	return fmt.Sprintf("Наблюдение начато %s", time.Now().Format(time.RFC1123))
+}
+
+func monitoringRetryMessage() string {
+	return fmt.Sprintf("Был сбой, переподключение %s", time.Now().Format(time.RFC1123))
 }
 
 // main executes the service.
@@ -180,6 +225,10 @@ func main() {
 		return
 	}
 
+	publisher := newWhatsAppPublisher(secrets)
+	if publisher != nil {
+		go runWhatsappResponder(publisher, newWebhookServer(secrets, settings, publisher))
+	}
 	bot, err := tgbotapi.NewBotAPI(secrets.TelegramBotToken)
 	if err != nil {
 		log.Fatalf("Error initializing bot: %v", err)
@@ -189,8 +238,13 @@ func main() {
 		go runYandexMonitor(secrets.YandexDiskClientToken)
 	}
 
+	// msgText is the monitoring start text. The outer loop retries the same
+	// message when the Telegram send fails, so the text is not regenerated per
+	// iteration: a retried send repeats the same start time, and the per-minute
+	// updates that follow carry the current time.
+	msgText := monitoringStartMessage()
+
 	for {
-		msgText := fmt.Sprintf("Соединение установлено %s", time.Now().Format(time.RFC1123))
 		msgConf := tgbotapi.NewMessage(settings.TelegramChannelID, msgText)
 
 		msg, err := bot.Send(msgConf)
@@ -233,7 +287,11 @@ func main() {
 		}
 
 		if updateFailed {
+			// The updates stopped, so the next successful send opens a new
+			// monitoring period: the start time is taken here, and the outer loop
+			// sends it as the new initial message.
 			time.Sleep(RetryDelay)
+			msgText = monitoringRetryMessage()
 		}
 	}
 }
